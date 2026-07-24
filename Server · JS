@@ -1,0 +1,93 @@
+const express = require('express');
+const cors = require('cors');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+if (!BOT_TOKEN || !CHAT_ID) {
+  console.warn('WARNING: TELEGRAM_BOT_TOKEN and/or TELEGRAM_CHAT_ID env vars are not set.');
+}
+
+// simple in-memory rate limit: max 5 requests per IP per 10 minutes
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT_MAX = 5;
+
+function isRateLimited(ip) {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip) || { count: 0, windowStart: now };
+  if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+  entry.count += 1;
+  rateLimitMap.set(ip, entry);
+  return entry.count > RATE_LIMIT_MAX;
+}
+
+app.get('/', (req, res) => {
+  res.send('VantageRise relay is running.');
+});
+
+app.post('/notify', async (req, res) => {
+  try {
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+    if (isRateLimited(ip)) {
+      return res.status(429).json({ success: false, error: 'Too many requests. Please try again later.' });
+    }
+
+    // honeypot check - if the hidden botcheck field is filled, silently drop it
+    if (req.body.botcheck) {
+      return res.json({ success: true });
+    }
+
+    const { name, email, telegram_handle, niche, message } = req.body;
+
+    if (!name || !email) {
+      return res.status(400).json({ success: false, error: 'Missing required fields.' });
+    }
+
+    const text =
+      `📩 *New VantageRise Inquiry*\n\n` +
+      `*Name:* ${escapeMd(name)}\n` +
+      `*Email:* ${escapeMd(email)}\n` +
+      `*Telegram:* ${escapeMd(telegram_handle || '—')}\n` +
+      `*Niche:* ${escapeMd(niche || '—')}\n\n` +
+      `*Message:*\n${escapeMd(message || '—')}`;
+
+    const tgRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        text,
+        parse_mode: 'Markdown'
+      })
+    });
+
+    const tgData = await tgRes.json();
+
+    if (!tgData.ok) {
+      console.error('Telegram API error:', tgData);
+      return res.status(502).json({ success: false, error: 'Failed to deliver message to Telegram.' });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Relay error:', err);
+    res.status(500).json({ success: false, error: 'Internal server error.' });
+  }
+});
+
+function escapeMd(str) {
+  return String(str).replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
+}
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`VantageRise relay listening on port ${PORT}`);
+});
