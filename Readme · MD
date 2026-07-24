@@ -1,0 +1,33 @@
+# VantageRise Relay
+
+Tiny Express server that receives contact-form submissions from the VantageRise
+website and forwards them to a Telegram chat via the Bot API. Keeps the bot
+token off the public website (it lives only in server environment variables).
+
+## Deploy to Railway
+
+1. Push this folder to a GitHub repo.
+2. In Railway: **New Project** → **Deploy from GitHub repo** → select the repo.
+3. Railway auto-detects Node.js and will run `npm install` and `npm start`
+   automatically. If it asks explicitly:
+   - **Build Command:** `npm install`
+   - **Start Command:** `npm start`
+4. Add environment variables (service → **Variables** tab):
+   - `TELEGRAM_BOT_TOKEN` = your bot token from BotFather
+   - `TELEGRAM_CHAT_ID` = your Telegram chat ID
+5. Railway deploys automatically on push. To get a public URL: go to
+   **Settings → Networking → Generate Domain**. You'll get something like
+   `vantagerise-relay-production.up.railway.app`.
+6. Test it's alive by visiting that URL in a browser — you should see
+   "VantageRise relay is running."
+7. Paste that URL (with `/notify` on the end) into the website's `RELAY_URL`
+   constant in the main site's `<script>` block, so the contact form can
+   reach it.
+
+## Notes
+
+- Railway's free tier includes a monthly usage credit; the service may
+  sleep or need redeploying if you exceed it, but for a low-traffic contact
+  form this should stay well within the free allowance.
+- Basic rate limiting (5 requests / 10 min per IP) and a honeypot field are
+  built in to cut down on spam.
